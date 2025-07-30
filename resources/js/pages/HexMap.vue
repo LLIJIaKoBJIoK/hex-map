@@ -1,41 +1,65 @@
 <script setup>
-import { ref, computed } from 'vue'
-import HexModal from '@/Components/HexModal.vue'
-import {
-  generateHexes,
-  generateEdges
-} from '@/utils/hexMapGenerator.js'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import { generateHexes, size } from '@/utils/hexMapGenerator'
 
 const radius = ref(3)
-const selectedHex = ref(null)
-const hoverEdgeId = ref(null)
+const hexes = computed(() => generateHexes(radius.value))
 
-const size = 40
+const windowWidth = ref(window.innerWidth)
+const windowHeight = ref(window.innerHeight)
 
-const hexes = computed(() => generateHexes(radius.value, size))
-const edges = computed(() => generateEdges(hexes.value))
+// Размеры SVG-контейнера (будем считать без области кнопок)
+const buttonsHeight = 50 // примерная высота области с кнопками сверху
 
-function onHexClick(hex) {
-  selectedHex.value = hex
+const svgWidth = ref(windowWidth.value)
+const svgHeight = ref(windowHeight.value - buttonsHeight)
+
+const offsetX = computed(() => svgWidth.value / 2)
+const offsetY = computed(() => svgHeight.value / 2)
+
+function updateSize() {
+  windowWidth.value = window.innerWidth
+  windowHeight.value = window.innerHeight
+  svgWidth.value = windowWidth.value
+  svgHeight.value = windowHeight.value - buttonsHeight
 }
 
-function onEdgeMouseOver(id) {
-  hoverEdgeId.value = id
-}
-function onEdgeMouseOut() {
-  hoverEdgeId.value = null
-}
+onMounted(() => {
+  window.addEventListener('resize', updateSize)
+})
 
-// Центровка
-const svgWidth = 800
-const svgHeight = 600
-const offsetX = svgWidth / 2
-const offsetY = svgHeight / 2
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', updateSize)
+})
+
+// Рассчитаем viewBox для SVG, чтобы карта полностью умещалась с учётом размера radius
+
+const padding = 20
+
+const viewBox = computed(() => {
+  // Максимальный q и r по radius
+  // Гексы расположены в axial coords от -radius до radius
+
+  // Примерный расчет размера карты в пикселях по оси X и Y:
+  // По X: ширина ~ 2 * radius * sqrt(3) * size
+  // По Y: высота ~ 2 * radius * 1.5 * size
+
+  const mapWidth = (Math.sqrt(3) * size * (radius.value * 2 + 1)) + padding * 2
+  const mapHeight = (1.5 * size * (radius.value * 2 + 1)) + padding * 2
+
+  // viewBox должен покрывать всю карту с небольшим отступом
+
+  // Центрируем карту: смещаем viewBox так, чтобы центр карты был в центре viewBox
+  const minX = -mapWidth / 2
+  const minY = -mapHeight / 2
+
+  return `${minX} ${minY} ${mapWidth} ${mapHeight}`
+})
 </script>
 
 <template>
-  <div class="flex flex-col items-center gap-4">
-    <div class="flex gap-2 mb-4">
+  <div class="w-screen h-screen flex flex-col items-center bg-white select-none overflow-hidden">
+    <div class="flex gap-2 py-2 px-4">
       <button
         v-for="r in [3, 4, 5]"
         :key="r"
@@ -46,46 +70,22 @@ const offsetY = svgHeight / 2
       </button>
     </div>
 
-    <svg
-      :width="svgWidth"
-      :height="svgHeight"
-      :viewBox="`0 0 ${svgWidth} ${svgHeight}`"
-      class="border rounded shadow"
-    >
-      <!-- Edges -->
-      <line
-        v-for="edge in edges"
-        :key="edge.id"
-        :x1="edge.start.x + offsetX"
-        :y1="edge.start.y + offsetY"
-        :x2="edge.end.x + offsetX"
-        :y2="edge.end.y + offsetY"
-        :class="{ 'edge-hovered': hoverEdgeId === edge.id }"
-        stroke="black"
-        stroke-width="2"
-        @mouseover="onEdgeMouseOver(edge.id)"
-        @mouseout="onEdgeMouseOut"
-        style="cursor:pointer"
-      />
-
-      <!-- Hexes -->
-      <polygon
-        v-for="hex in hexes"
-        :key="`${hex.q},${hex.r}`"
-        :points="hex.points.map(p => `${p.x + offsetX},${p.y + offsetY}`).join(' ')"
-        class="fill-white stroke-gray-500 hover:fill-blue-100"
-        stroke-width="1"
-        @click="onHexClick(hex)"
-      />
-    </svg>
-
-    <HexModal v-if="selectedHex" :hex="selectedHex" @close="selectedHex = null" />
+    <div class="flex-grow flex justify-center items-center overflow-hidden w-full">
+      <svg
+        :width="svgWidth"
+        :height="svgHeight"
+        :viewBox="viewBox"
+        class="border border-gray-300 rounded shadow"
+        style="max-width: 100%; max-height: 100%;"
+      >
+        <polygon
+          v-for="hex in hexes"
+          :key="`${hex.q},${hex.r}`"
+          :points="hex.points.map(p => `${p.x},${p.y}`).join(' ')"
+          class="fill-white stroke-gray-500"
+          stroke-width="1"
+        />
+      </svg>
+    </div>
   </div>
 </template>
-
-<style scoped>
-.edge-hovered {
-  stroke: blue !important;
-  stroke-width: 4 !important;
-}
-</style>
