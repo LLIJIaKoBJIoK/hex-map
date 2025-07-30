@@ -2,109 +2,150 @@
 import { ref, computed } from 'vue'
 import HexModal from '@/Components/HexModal.vue'
 
-const radiusOptions = [3, 4, 5]
-const selectedRadius = ref(3)
-const hexSize = 50
+const radius = ref(3)
 const selectedHex = ref(null)
-const modalOpen = ref(false)
+const hoverEdgeId = ref(null)
 
-// Центр SVG
-const viewBoxSize = 1000
-const center = { x: viewBoxSize / 2, y: viewBoxSize / 2 }
+const size = 40
+const width = Math.sqrt(3) * size
+const height = size * 2
+const horizSpacing = width
+const vertSpacing = (3 / 4) * height
 
-// Axial to pixel conversion
-const axialToPixel = (q, r) => {
-  const x = hexSize * Math.sqrt(3) * (q + r / 2)
-  const y = hexSize * 1.5 * r
-  return { x: x + center.x, y: y + center.y }
+function axialToPixel(q, r) {
+  const x = size * Math.sqrt(3) * (q + r / 2)
+  const y = size * (3 / 2) * r
+  return { x, y }
 }
 
-// Получение углов гекса
-const getHexCorners = (q, r) => {
-  const center = axialToPixel(q, r)
-  const corners = []
+
+function getHexPoints(cx, cy) {
+  const points = []
   for (let i = 0; i < 6; i++) {
-    const angle = Math.PI / 180 * (60 * i - 30)
-    const x = center.x + hexSize * Math.cos(angle)
-    const y = center.y + hexSize * Math.sin(angle)
-    corners.push({ x, y })
+    const angle_deg = 60 * i - 30
+    const angle_rad = Math.PI / 180 * angle_deg
+    points.push({
+      x: cx + size * Math.cos(angle_rad),
+      y: cy + size * Math.sin(angle_rad)
+    })
   }
-  return corners
+  return points
 }
 
-// Генерация гексов в пределах радиуса
-const hexes = computed(() => {
-  const results = []
-  const seenEdges = new Set()
-
-  for (let q = -selectedRadius.value; q <= selectedRadius.value; q++) {
-    const r1 = Math.max(-selectedRadius.value, -q - selectedRadius.value)
-    const r2 = Math.min(selectedRadius.value, -q + selectedRadius.value)
-    for (let r = r1; r <= r2; r++) {
-      const corners = getHexCorners(q, r)
-
-      const edges = corners.map((corner, i) => {
-        const nextCorner = corners[(i + 1) % 6]
-        const key = `${corner.x},${corner.y}-${nextCorner.x},${nextCorner.y}`
-        const reverseKey = `${nextCorner.x},${nextCorner.y}-${corner.x},${corner.y}`
-        if (!seenEdges.has(key) && !seenEdges.has(reverseKey)) {
-          seenEdges.add(key)
-          return { x1: corner.x, y1: corner.y, x2: nextCorner.x, y2: nextCorner.y }
-        }
-        return null
-      }).filter(e => e !== null)
-
-      results.push({ q, r, corners, edges })
+function generateHexes(radius) {
+  const hexes = []
+  for (let r = -radius; r <= radius; r++) {
+    for (let q = Math.max(-radius, -r - radius); q <= Math.min(radius, -r + radius); q++) {
+      const { x, y } = axialToPixel(q, r)
+      const points = getHexPoints(x, y)
+      hexes.push({ q, r, x, y, points })
     }
   }
-  return results
+  return hexes
+}
+
+
+const hexes = computed(() => generateHexes(radius.value))
+
+function onHexClick(hex) {
+  selectedHex.value = hex
+}
+
+function edgeId(p1, p2) {
+  const [a, b] = [p1, p2].sort((pA, pB) =>
+    pA.x === pB.x ? pA.y - pB.y : pA.x - pB.x
+  )
+  return `${a.x},${a.y}-${b.x},${b.y}`
+}
+
+const edges = computed(() => {
+  const set = new Set()
+  const result = []
+
+  for (const hex of hexes.value) {
+    const pts = hex.points
+    for (let i = 0; i < 6; i++) {
+      const start = pts[i]
+      const end = pts[(i + 1) % 6]
+      const id = edgeId(start, end)
+      if (!set.has(id)) {
+        set.add(id)
+        result.push({ id, start, end })
+      }
+    }
+  }
+
+  return result
 })
 
-const openModal = (q, r) => {
-  selectedHex.value = { q, r }
-  modalOpen.value = true
+function onEdgeMouseOver(id) {
+  hoverEdgeId.value = id
 }
+
+function onEdgeMouseOut() {
+  hoverEdgeId.value = null
+}
+
+// Центровка
+const svgWidth = 800
+const svgHeight = 600
+const offsetX = svgWidth / 2
+const offsetY = svgHeight / 2
 </script>
 
 <template>
   <div class="flex flex-col items-center gap-4">
-    <div class="flex gap-2">
-      <span class="text-sm">Радиус:</span>
+    <div class="flex gap-2 mb-4">
       <button
-        v-for="r in radiusOptions"
+        v-for="r in [3, 4, 5]"
         :key="r"
-        @click="selectedRadius = r"
-        class="px-2 py-1 bg-blue-500 text-white rounded"
-        :class="{ 'bg-blue-700': selectedRadius === r }"
+        class="px-3 py-1 bg-gray-300 rounded hover:bg-gray-400"
+        @click="radius = r"
       >
-        {{ r }}
+        Радиус {{ r }}
       </button>
     </div>
 
-    <svg :viewBox="`0 0 ${viewBoxSize} ${viewBoxSize}`" class="w-full max-w-4xl h-[90vh] border rounded shadow">
-      <g v-for="hex in hexes" :key="`${hex.q},${hex.r}`">
-        <!-- Гексагон -->
-        <polygon
-          :points="hex.corners.map(p => `${p.x},${p.y}`).join(' ')"
-          fill="#eee"
-          stroke="#999"
-          stroke-width="1"
-          @click="openModal(hex.q, hex.r)"
-          class="cursor-pointer hover:fill-blue-200 transition"
-        />
+    <svg
+      :width="svgWidth"
+      :height="svgHeight"
+      :viewBox="`0 0 ${svgWidth} ${svgHeight}`"
+      class="border rounded shadow"
+    >
+      <!-- Edges -->
+      <line
+        v-for="edge in edges"
+        :key="edge.id"
+        :x1="edge.start.x + offsetX"
+        :y1="edge.start.y + offsetY"
+        :x2="edge.end.x + offsetX"
+        :y2="edge.end.y + offsetY"
+        :class="{ 'edge-hovered': hoverEdgeId === edge.id }"
+        stroke="black"
+        stroke-width="2"
+        @mouseover="onEdgeMouseOver(edge.id)"
+        @mouseout="onEdgeMouseOut"
+        style="cursor:pointer"
+      />
 
-        <!-- Отображаем уникальные рёбра -->
-        <line
-          v-for="(edge, i) in hex.edges"
-          :key="i"
-          :x1="edge.x1" :y1="edge.y1"
-          :x2="edge.x2" :y2="edge.y2"
-          stroke="#999"
-          stroke-width="1"
-        />
-      </g>
+      <!-- Hexes -->
+      <polygon
+        v-for="hex in hexes"
+        :key="`${hex.q},${hex.r}`"
+        :points="hex.points.map(p => `${p.x + offsetX},${p.y + offsetY}`).join(' ')"
+        class="fill-white stroke-gray-500 hover:fill-blue-100"
+        stroke-width="1"
+        @click="onHexClick(hex)"
+      />
     </svg>
 
-    <HexModal v-if="modalOpen" :hex="selectedHex" @close="modalOpen = false" />
+    <HexModal v-if="selectedHex" :hex="selectedHex" @close="selectedHex = null" />
   </div>
 </template>
+
+<style scoped>
+.edge-hovered {
+  stroke: blue !important;
+  stroke-width: 4 !important;
+}
+</style>
